@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import numpy as np
+import onnxruntime as ort
 from ts.torch_handler.base_handler import BaseHandler
 from optimum.onnxruntime import ORTModelForSequenceClassification
 from transformers import AutoTokenizer
@@ -22,6 +23,22 @@ class NLIDebertaHandler(BaseHandler):
         self.tokenizer = None
         self.label_mapping = ['contradiction', 'entailment', 'neutral']
         self.initialized = False
+        self.device = None
+    
+    def _get_execution_provider(self):
+        """
+        Detect and return the best available execution provider.
+        Prioritizes GPU (CUDA) if available, falls back to CPU.
+        """
+        available_providers = ort.get_available_providers()
+        logger.info(f"Available ONNX Runtime providers: {available_providers}")
+        
+        if 'CUDAExecutionProvider' in available_providers:
+            logger.info("Using GPU (CUDA) for inference")
+            return 'CUDAExecutionProvider'
+        else:
+            logger.info("Using CPU for inference")
+            return 'CPUExecutionProvider'
     
     def initialize(self, context):
         """
@@ -33,16 +50,20 @@ class NLIDebertaHandler(BaseHandler):
         
         logger.info(f"Loading model from {model_dir}")
         
-        # Load ONNX model
+        # Detect best execution provider (GPU/CPU)
+        provider = self._get_execution_provider()
+        self.device = 'cuda' if provider == 'CUDAExecutionProvider' else 'cpu'
+        
+        # Load ONNX model with detected provider
         self.model = ORTModelForSequenceClassification.from_pretrained(
             model_dir,
-            provider="CPUExecutionProvider"
+            provider=provider
         )
         
         # Load tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model_dir)
         
-        logger.info("Model and tokenizer loaded successfully")
+        logger.info(f"Model and tokenizer loaded successfully on {self.device.upper()}")
         self.initialized = True
     
     def preprocess(self, requests):
